@@ -3,6 +3,11 @@
 
 # COMMAND ----------
 
+# pip install後にPythonプロセスを再起動し、パッケージの競合を解消
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import warnings
 warnings.filterwarnings("ignore")
 
