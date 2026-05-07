@@ -1,5 +1,6 @@
 # Databricks notebook source
 # MAGIC %pip install -r requirements.txt
+# MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
 
@@ -20,7 +21,7 @@ with open('config/application.yaml', 'r') as f:
 # COMMAND ----------
 
 # Unity Catalog: カタログとスキーマを作成
-_ = sql("CREATE CATALOG IF NOT EXISTS {}".format(config['database']['catalog']))
+# _ = sql("CREATE CATALOG IF NOT EXISTS {}".format(config['database']['catalog']))
 _ = sql("CREATE SCHEMA IF NOT EXISTS {}.{}".format(
   config['database']['catalog'],
   config['database']['schema']

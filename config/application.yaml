@@ -1,8 +1,8 @@
 yfinance:
   # ソリューションはインクリメンタルに実行される可能性がありますが
   # インサイトを得るのに十分な過去データを確保します
-  mindate: '2018-05-01'
-  maxdate: '2020-05-01'
+  mindate: '2024-05-01'
+  maxdate: '2026-05-01'
 
 model:
   # Unity Catalogに登録されるモデルの名前（catalog.schema.model_name 形式で自動構成）
@@ -12,7 +12,7 @@ model:
 
 database:
   # Unity Catalog の3レベル名前空間（catalog.schema.table）
-  catalog: 'main'
+  catalog: 'shotkotani_demo_ws'
   schema: 'solacc_var'
   tables:
     stocks: 'market_data'
