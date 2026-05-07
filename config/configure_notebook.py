@@ -16,14 +16,14 @@ with open('config/application.yaml', 'r') as f:
 
 dbutils.fs.mkdirs(config['database']['path'])
 _ = sql("CREATE DATABASE IF NOT EXISTS {} LOCATION '{}'".format(
-  config['database']['name'], 
+  config['database']['name'],
   config['database']['path']
 ))
 
 # COMMAND ----------
 
-# use our newly created database by default
-# each table will be created as a MANAGED table under this directory
+# 新しく作成したデータベースをデフォルトとして使用
+# 各テーブルはこのディレクトリ配下にマネージドテーブルとして作成される
 _ = sql("USE {}".format(config['database']['name']))
 
 # COMMAND ----------

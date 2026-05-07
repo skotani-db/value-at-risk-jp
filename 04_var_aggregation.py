@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # VaR Aggregation
-# MAGIC In this notebook, we demonstrate the versatile nature of our model carlo simulation on **Delta Lake**. Stored in its most granular form, analysts have the flexibility to slice and dice their data to aggregate value-at-risk on demand via aggregated vector functions from **Spark ML**.
+# MAGIC # VaR集計
+# MAGIC 本ノートブックでは、**Delta Lake**上のモンテカルロシミュレーションの多用途な性質を実演します。最も細かい粒度で保存されたデータにより、アナリストは**Spark ML**の集約ベクトル関数を使用して、データを自在にスライス＆ダイスし、オンデマンドでバリュー・アット・リスクを集計する柔軟性を持ちます。
 
 # COMMAND ----------
 
@@ -20,8 +20,8 @@ simulation_df = (
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Point in time VaR
-# MAGIC With all our simulations stored with finest granularity, we can access a specific slice for a given day and retrieve the associated value at risk as a simple quantile function. We  aggregate trial vectors across our entire portfolio using the built in function of spark ML, `Summarizer`. 
+# MAGIC ## ポイント・イン・タイムVaR
+# MAGIC すべてのシミュレーションが最細粒度で保存されているため、特定の日のスライスにアクセスし、シンプルな分位関数として関連するバリュー・アット・リスクを取得できます。Spark MLの組み込み関数`Summarizer`を使用して、ポートフォリオ全体の試行ベクトルを集約します。
 
 # COMMAND ----------
 
@@ -48,8 +48,8 @@ plot_var(point_in_time_vector, 99)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Evolution of risk exposure
-# MAGIC The same can be achieved at scale, over our entire trading history. For each date, we aggregate all trial vectors and extract the worst 1% of events 
+# MAGIC ## リスクエクスポージャーの推移
+# MAGIC 同様のことを、取引履歴全体にわたってスケールで実現できます。各日付において、すべての試行ベクトルを集約し、最悪の1%のイベントを抽出します。
 
 # COMMAND ----------
 
@@ -70,16 +70,16 @@ risk_exposure = (
 import matplotlib.pyplot as plt
 plt.figure(figsize=(20,8))
 plt.plot(risk_exposure['date'], risk_exposure['var_99'])
-plt.title('VaR across all portfolio')
-plt.ylabel('value at risk')
-plt.xlabel('date')
+plt.title('ポートフォリオ全体のVaR')
+plt.ylabel('バリュー・アット・リスク')
+plt.xlabel('日付')
 plt.show()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Slice and Dice
-# MAGIC The main advantage of leaving monte carlo data in its finest granularity is the ability to slice and dice and visualize different segments, industries, countries. Using optimized delta tables, portfolio managers and risk analysts could efficiently run what-if scenario, adhoc analysis, such as value at risk aggregation by country of operation
+# MAGIC ## スライス＆ダイス
+# MAGIC モンテカルロデータを最細粒度で保持する主な利点は、異なるセグメント、業種、国別にスライスおよびダイスして可視化できることです。最適化されたDeltaテーブルを使用することで、ポートフォリオマネージャーやリスクアナリストは、What-Ifシナリオやアドホック分析（例：運用国別のバリュー・アット・リスク集計）を効率的に実行できます。
 
 # COMMAND ----------
 
@@ -99,15 +99,15 @@ fig, ax = plt.subplots(figsize=(20,8))
 for label, df in risk_exposure_country.groupby('country'):
     df.plot.line(x='date', y='var_99', ax=ax, label=label)
 
-plt.title('VaR by country')
-plt.ylabel('value at risk')
-plt.xlabel('date')
+plt.title('国別VaR')
+plt.ylabel('バリュー・アット・リスク')
+plt.xlabel('日付')
 plt.show()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC The same can be translated as a risk contribution by industry for a given country. How much of my overall risk is linked to my investment in the mining industry? How would I reduce this exposure by rebalancing my portfolio?
+# MAGIC 同様に、特定の国における業種別リスク寄与度に変換できます。全体的なリスクのうち、鉱業への投資にどの程度関連しているか？ポートフォリオのリバランスによってこのエクスポージャーをどのように削減できるか？
 
 # COMMAND ----------
 

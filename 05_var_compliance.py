@@ -1,16 +1,16 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Compliance
-# MAGIC The Basel Committee specified a methodology for backtesting VaR. The 1 day VaR 99 results are to
-# MAGIC be compared against daily P&L’s. Backtests are to be performed quarterly using the most recent 250
-# MAGIC days of data. Based on the number of exceedances experienced during that period, the VaR
-# MAGIC measure is categorized as falling into one of three colored zones:
-# MAGIC 
-# MAGIC | Level   | Threshold                 | Results                       |
+# MAGIC # コンプライアンス
+# MAGIC バーゼル委員会はVaRのバックテスト手法を規定しています。1日VaR99の結果は
+# MAGIC 日次P&L（損益）と比較されます。バックテストは四半期ごとに直近250日間の
+# MAGIC データを使用して実施されます。その期間中の超過回数に基づき、VaR
+# MAGIC 指標は以下の3つのカラーゾーンのいずれかに分類されます：
+# MAGIC
+# MAGIC | レベル   | 閾値                 | 結果                       |
 # MAGIC |---------|---------------------------|-------------------------------|
-# MAGIC | Green   | Up to 4 exceedances       | No particular concerns raised |
-# MAGIC | Yellow  | Up to 9 exceedances       | Monitoring required           |
-# MAGIC | Red     | More than 10 exceedances  | VaR measure to be improved    |
+# MAGIC | グリーン   | 超過4回以下       | 特段の懸念なし |
+# MAGIC | イエロー  | 超過9回以下       | モニタリングが必要           |
+# MAGIC | レッド     | 超過10回以上  | VaR指標の改善が必要    |
 
 # COMMAND ----------
 
@@ -30,8 +30,8 @@ simulation_df = (
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Get investment returns
-# MAGIC In order to detect possible investments breaches, one would need to overlay existing investments to latest value at risk calculations. We simply compute our investment returns using window partitioning function
+# MAGIC ## 投資リターンの取得
+# MAGIC 投資の閾値超過を検出するには、既存の投資を最新のバリュー・アット・リスク計算に重ね合わせる必要があります。ウィンドウパーティショニング関数を使用して投資リターンを計算します。
 
 # COMMAND ----------
 
@@ -39,10 +39,10 @@ from pyspark.sql import Window
 from pyspark.sql import functions as F
 from utils.var_udf import compute_return
 
-# Apply a tumbling 1 day window on each instrument
+# 各銘柄に1日のタンブリングウィンドウを適用
 window = Window.partitionBy('ticker').orderBy('date').rowsBetween(-1, 0)
 
-# apply sliding window and take first element
+# スライディングウィンドウを適用し、最初の要素を取得
 inv_returns_df = spark.table(config['database']['tables']['stocks']) \
   .filter(F.col('close').isNotNull()) \
   .join(spark.createDataFrame(portfolio_df), ['ticker']) \
@@ -51,14 +51,14 @@ inv_returns_df = spark.table(config['database']['tables']['stocks']) \
   .withColumn("weighted_return", F.col('return') * F.col('weight')) \
   .groupBy('date') \
   .agg(F.sum('weighted_return').alias('return'))
-  
+
 display(inv_returns_df)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Retrieve value at risk
-# MAGIC As covered in our previous section, we can easily compute our value at risk against our entire history by aggregating trial vectors and finding a 99 percentile.
+# MAGIC ## バリュー・アット・リスクの取得
+# MAGIC 前のセクションで説明したように、試行ベクトルを集約し99パーセンタイルを求めることで、全履歴に対するバリュー・アット・リスクを容易に計算できます。
 
 # COMMAND ----------
 
@@ -77,7 +77,7 @@ risk_exposure = (
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC As previously, `tempo` is used as an efficient way to join those 2 series (investments and risk exposure) together.
+# MAGIC 前回と同様に、`tempo`を使用してこれら2つの系列（投資とリスクエクスポージャー）を効率的に結合します。
 
 # COMMAND ----------
 
@@ -103,12 +103,12 @@ display(asof_df)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Extract breaches
-# MAGIC We want to retrieve all investments done within a 250 days period that exceeded our Var99 threshold
+# MAGIC ## 閾値超過の抽出
+# MAGIC 250日間の期間内でVaR99の閾値を超えたすべての投資を取得します。
 
 # COMMAND ----------
 
-# timestamp is interpreted as UNIX timestamp in seconds
+# タイムスタンプはUNIXタイムスタンプ（秒）として解釈される
 days = lambda i: i * 86400
 compliance_window = Window.orderBy(F.col("date").cast("long")).rangeBetween(-days(250), 0)
 
@@ -134,34 +134,34 @@ compliance_df = compliance_df.reindex(idx, method='pad')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Finally, we can represent our investments against our value at risk
+# MAGIC 最後に、投資をバリュー・アット・リスクに対して可視化します。
 
 # COMMAND ----------
 
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 
 f, (a0, a1) = plt.subplots(2, 1, figsize=(20,8), gridspec_kw={'height_ratios': [10,1]})
 
-a0.plot(compliance_df.index, compliance_df['return'], color='#86bf91', label='returns')
-a0.plot(compliance_df.index, compliance_df['var_99'], label="var99", c='red', linestyle='--')
+a0.plot(compliance_df.index, compliance_df['return'], color='#86bf91', label='リターン')
+a0.plot(compliance_df.index, compliance_df['var_99'], label="VaR99", c='red', linestyle='--')
 a0.axhline(y=0, linestyle='--', alpha=0.4, color='#86bf91', zorder=1)
-a0.title.set_text('VAR99 compliance')
-a0.set_ylabel('Daily log return')
+a0.title.set_text('VaR99 コンプライアンス')
+a0.set_ylabel('日次対数リターン')
 a0.legend(loc="upper left")
 
 colors = ['green', 'orange', 'red']
-a1.bar(compliance_df.index, 1, color=[colors[i] for i in compliance_df['basel']], label='breaches', alpha=0.5, align='edge', width=1.0)
+a1.bar(compliance_df.index, 1, color=[colors[i] for i in compliance_df['basel']], label='超過', alpha=0.5, align='edge', width=1.0)
 a1.get_yaxis().set_ticks([])
-a1.set_xlabel('Date')
+a1.set_xlabel('日付')
 
 plt.subplots_adjust(wspace=0, hspace=0)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #### Wall St banks’ trading risk surges to highest since 2011
-# MAGIC 
-# MAGIC [...] The top five Wall St banks’ aggregate “value-at-risk”, which measures their potential daily trading losses, soared to its highest level in 34 quarters during the first three months of the year, according to Financial Times analysis of the quarterly VaR high disclosed in banks’ regulatory filings
-# MAGIC 
+# MAGIC #### ウォール街の銀行、トレーディングリスクが2011年以来の最高水準に急騰
+# MAGIC
+# MAGIC [...] ウォール街の大手5行の「バリュー・アット・リスク」（潜在的な日次トレーディング損失を測定する指標）の合計が、今年第1四半期に34四半期ぶりの最高水準に急騰したことが、銀行の規制報告書に開示された四半期VaR最高値に関するFinancial Timesの分析で明らかになった。
+# MAGIC
 # MAGIC [https://on.ft.com/2SSqu8Q](https://on.ft.com/2SSqu8Q)

@@ -1,4 +1,5 @@
 def plot_candlesticks(stock_df):
+  """ローソク足チャートを描画"""
   import plotly.graph_objects as go
   layout = go.Layout(
     autosize=False,
@@ -7,25 +8,26 @@ def plot_candlesticks(stock_df):
   )
   fig = go.Figure(
     data=[go.Candlestick(
-      x=stock_df['date'], 
-      open=stock_df['open'], 
-      high=stock_df['high'], 
-      low=stock_df['low'], 
+      x=stock_df['date'],
+      open=stock_df['open'],
+      high=stock_df['high'],
+      low=stock_df['low'],
       close=stock_df['close']
     )],
     layout=layout
   )
   fig.show()
-  
-  
+
+
 def plot_var(simulations, var):
-  
+  """VaR分布のヒストグラムと正規分布のオーバーレイを描画"""
+
   import pandas as pd
   import numpy as np
   import matplotlib.pyplot as plt
   from scipy import stats
   from utils.var_utils import get_var
-  
+
   mean = np.mean(simulations)
   z = stats.norm.ppf(1-var)
   m1 = np.min(simulations)
@@ -55,5 +57,5 @@ def plot_var(simulations, var):
           x.axhline(y=tick, linestyle='dashed', alpha=0.4, color='#eeeeee', zorder=1)
 
       x.set_title("VAR{} = {:.3f}".format(var, q1), weight='bold', size=15)
-      x.set_xlabel("Returns", labelpad=20, weight='bold', size=12)
-      x.set_ylabel("Density", labelpad=20, weight='bold', size=12)
+      x.set_xlabel("リターン", labelpad=20, weight='bold', size=12)
+      x.set_ylabel("密度", labelpad=20, weight='bold', size=12)

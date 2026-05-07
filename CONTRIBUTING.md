@@ -1,1 +1,1 @@
-We happily welcome contributions to this project. We use GitHub Issues to track community reported issues and GitHub Pull Requests for accepting changes pursuant to a CLA.
+本プロジェクトへの貢献を歓迎します。コミュニティから報告された問題の追跡にはGitHub Issuesを使用し、CLAに基づく変更の受け入れにはGitHub Pull Requestsを使用しています。

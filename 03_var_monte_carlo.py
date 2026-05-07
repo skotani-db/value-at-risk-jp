@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Monte Carlo
-# MAGIC In this notebook, we use our model created in previous stage and run monte carlo simulations in parallel using **Apache Spark**. For each simulated market condition sampled from a multi variate distribution, we will predict our hypothetical instrument returns. By storing all of our data back into **Delta Lake**, we will create a data asset that can be queried on-demand across multiple down stream use cases
+# MAGIC # モンテカルロシミュレーション
+# MAGIC 本ノートブックでは、前のステージで作成したモデルを使用し、**Apache Spark**を活用してモンテカルロシミュレーションを並列実行します。多変量分布からサンプリングされた各シミュレーション市場条件に対して、仮想的な銘柄リターンを予測します。すべてのデータを**Delta Lake**に保存することで、複数の下流ユースケースでオンデマンドにクエリ可能なデータアセットを作成します。
 
 # COMMAND ----------
 
@@ -14,7 +14,7 @@ from datetime import timedelta
 import pandas as pd
 import datetime
 
-# We will generate monte carlo simulation for every week since we've built our model
+# モデル構築以降の毎週に対してモンテカルロシミュレーションを生成
 today = datetime.datetime.strptime(config['yfinance']['maxdate'], '%Y-%m-%d')
 first = datetime.datetime.strptime(config['model']['date'], '%Y-%m-%d')
 run_dates = pd.date_range(first, today, freq='w')
@@ -22,8 +22,8 @@ run_dates = pd.date_range(first, today, freq='w')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Market volatility
-# MAGIC As we've pre-computed all statistics at ingest time, we can easily retrieve the most recent statistical distribution of market indicators for each date we want to run monte carlo simulation against. We can access temporal information using asof join of our [`tempo`](https://databrickslabs.github.io/tempo/) library
+# MAGIC ## マーケットボラティリティ
+# MAGIC データ取り込み時にすべての統計量を事前計算しているため、モンテカルロシミュレーションを実行したい各日付のマーケット指標の最新の統計分布を容易に取得できます。[`tempo`](https://databrickslabs.github.io/tempo/)ライブラリのas-of結合を使用して時系列情報にアクセスできます。
 
 # COMMAND ----------
 
@@ -46,8 +46,8 @@ display(volatility_df)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Distribute trials
-# MAGIC By fixing a seed strategy, we ensure that each trial will be independent (no random number will be the same) as well as enforcing full reproducibility should we need to process the same experiment twice
+# MAGIC ## 試行の分散処理
+# MAGIC シード戦略を固定することで、各試行が独立であること（同じ乱数が生成されないこと）を保証し、同じ実験を2回処理する必要がある場合の完全な再現性を確保します。
 
 # COMMAND ----------
 
@@ -73,7 +73,7 @@ display(market_conditions)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Since this was an expensive operation to cross join each trial ID with each simulated market condition, we can save that table as a delta table that we can process downstream. Furthermore, this table is generic as we only sampled points from known market volatility and did not take investment returns into account. New models and new trading strategies could be executed off the back of the exact same data without having to run this expensive process.
+# MAGIC 各試行IDとシミュレーション市場条件のクロス結合は計算コストが高いため、このテーブルをDeltaテーブルとして保存し、下流で処理できるようにします。さらに、このテーブルは既知のマーケットボラティリティからポイントをサンプリングしただけで、投資リターンは考慮していないため汎用的です。新しいモデルや新しいトレーディング戦略を、この高コストなプロセスを再実行することなく、同じデータに基づいて実行できます。
 
 # COMMAND ----------
 
@@ -84,20 +84,20 @@ _ = (
     .mode("overwrite")
     .format("delta")
     .saveAsTable(config['database']['tables']['mc_market'])
-)  
+)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Compute returns
-# MAGIC Finally, we can leverage our model created earlier to predict our investment return for each stock given generated market indicators
+# MAGIC ## リターンの計算
+# MAGIC 最後に、先ほど作成したモデルを活用して、生成されたマーケット指標に対する各銘柄の投資リターンを予測します。
 
 # COMMAND ----------
 
 import mlflow
 model_udf = mlflow.pyfunc.spark_udf(
-  model_uri='models:/{}/production'.format(config['model']['name']), 
-  result_type='float', 
+  model_uri='models:/{}/production'.format(config['model']['name']),
+  result_type='float',
   spark=spark
 )
 
@@ -115,7 +115,7 @@ display(simulations)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Although we processed our simulated market conditions as a large table made of very few columns, we may want to create a better data asset by wrapping all trials into well defined vectors. This asset will help us manipulate vectors through simple aggregated functions using the `Summarizer` class from `pyspark.ml.stat` (see next notebook)
+# MAGIC シミュレーション市場条件を非常に少ない列数の大きなテーブルとして処理しましたが、すべての試行を明確に定義されたベクトルにラップすることで、より良いデータアセットを作成できます。このアセットにより、`pyspark.ml.stat`の`Summarizer`クラスを使用したシンプルな集約関数でベクトルを操作できます（次のノートブック参照）。
 
 # COMMAND ----------
 
@@ -150,12 +150,12 @@ _ = (
     .mode("overwrite")
     .format("delta")
     .saveAsTable(config['database']['tables']['mc_trials'])
-)  
+)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC Finally, we make it easy to extract specific slices of our data asset by optimizing our table for faster read. This is achieved through the `OPTIMIZE` command of delta
+# MAGIC 最後に、テーブルを高速読み取り用に最適化することで、データアセットの特定のスライスを容易に抽出できるようにします。これはDeltaの`OPTIMIZE`コマンドによって実現されます。
 
 # COMMAND ----------
 

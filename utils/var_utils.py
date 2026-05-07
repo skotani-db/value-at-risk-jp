@@ -1,13 +1,14 @@
 def download_market_data(tick, min_date, max_date):
+    """Yahoo Financeからマーケットデータをダウンロード"""
     import pandas as pd
     import yfinance as yf
     msft = yf.Ticker(tick)
     raw = msft.history(start=min_date, end=max_date)[['Open', 'High', 'Low', 'Close', 'Volume']]
-    # fill in missing business days
+    # 欠損している営業日を補完
     idx = pd.date_range(min_date, max_date, freq='B')
-    # use last observation carried forward for missing value
+    # 欠損値には直前の観測値を前方補完
     output_df = raw.reindex(idx, method='pad')
-    # Pandas does not keep index (date) when converted into spark dataframe
+    # pandasはSparkデータフレームに変換する際にインデックス（日付）を保持しない
     output_df['date'] = output_df.index
     output_df['ticker'] = tick
     output_df = output_df.rename(
@@ -16,6 +17,7 @@ def download_market_data(tick, min_date, max_date):
 
 
 def generate_prices(start_price, mu, sigma, days):
+    """幾何ブラウン運動による価格シミュレーション"""
     import numpy as np
     shock = np.zeros(days)
     price = np.zeros(days)
@@ -28,23 +30,27 @@ def generate_prices(start_price, mu, sigma, days):
 
 
 def create_seed_df(runs):
+    """モンテカルロ試行用のシードデータフレームを作成"""
     import pandas as pd
     import numpy as np
     return pd.DataFrame(list(np.arange(0, runs)), columns=['trial_id'])
 
 
 def get_shortfall(simulations, var):
+    """期待ショートフォール（条件付きVaR）を計算"""
     import numpy as np
     var = get_var(simulations, var)
     return float(np.mean([s for s in simulations if s <= var]))
 
 
 def get_var(simulations, var):
+    """バリュー・アット・リスク（VaR）をパーセンタイルで計算"""
     import numpy as np
     return float(np.percentile(simulations, 100 - var))
 
 
 def non_linear_features(xs):
+    """非線形特徴量を生成（x, x^2, x^3, sqrt(|x|)）"""
     import numpy as np
     fs = []
     for x in xs:
@@ -56,6 +62,7 @@ def non_linear_features(xs):
 
 
 def predict_non_linears(ps, fs):
+    """非線形特徴量と重みから予測値を計算"""
     s = ps[0]
     for i, f in enumerate(fs):
         s = s + ps[i + 1] * f

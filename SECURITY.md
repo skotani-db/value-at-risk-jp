@@ -1,5 +1,5 @@
-# Security Policy
+# セキュリティポリシー
 
-## Reporting a Vulnerability
+## 脆弱性の報告
 
-Please email bugbounty@databricks.com to report any security vulnerabilities. We will acknowledge receipt of your vulnerability and strive to send you regular updates about our progress. If you're curious about the status of your disclosure please feel free to email us again. If you want to encrypt your disclosure email, you can use [this PGP key](https://keybase.io/arikfr/key.asc).
+セキュリティの脆弱性を報告するには、bugbounty@databricks.com にメールしてください。脆弱性の受領を確認し、進捗状況について定期的に更新をお送りします。報告の状況を知りたい場合は、再度メールでお問い合わせください。報告メールを暗号化したい場合は、[このPGPキー](https://keybase.io/arikfr/key.asc)を使用できます。
