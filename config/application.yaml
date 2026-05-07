@@ -5,15 +5,15 @@ yfinance:
   maxdate: '2020-05-01'
 
 model:
-  # MLFlowレジストリに登録されるpyfuncモデルの名前
+  # Unity Catalogに登録されるモデルの名前（catalog.schema.model_name 形式で自動構成）
   name: 'value_at_risk'
   # モデルを訓練する日付（yfinanceの終了日より前）
   date: '2019-09-01'
 
 database:
-  # すべてのDeltaテーブルはこのデータベース配下の外部マネージドテーブルとして保存される
-  name: 'solacc_var'
-  path: '/FileStore/solution_accelerators/var/database'
+  # Unity Catalog の3レベル名前空間（catalog.schema.table）
+  catalog: 'main'
+  schema: 'solacc_var'
   tables:
     stocks: 'market_data'
     indicators: 'market_indicators'

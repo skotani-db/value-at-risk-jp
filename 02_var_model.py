@@ -272,44 +272,39 @@ with mlflow.start_run(run_id=run_id) as run:
 
 client = mlflow.tracking.MlflowClient()
 model_uri = "runs:/{}/model".format(run_id)
-result = mlflow.register_model(model_uri, config['model']['name'])
+# Unity Catalog: catalog.schema.model_name 形式で登録
+uc_model_name = "{}.{}.{}".format(
+  config['database']['catalog'],
+  config['database']['schema'],
+  config['model']['name']
+)
+result = mlflow.register_model(model_uri, uc_model_name)
 version = result.version
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC プログラムでモデルを異なるステージに昇格させることもできます。実際のシナリオではモデルのレビューが必要ですが、ここでは次のノートブック用にプロダクションアーティファクトとして利用可能にし、以前の実行をプログラムでアーカイブに移行します。
+# MAGIC Unity Catalogではステージの代わりにエイリアスを使用してモデルバージョンを管理します。ここでは最新モデルに`champion`エイリアスを設定し、下流プロセスで利用可能にします。
 
 # COMMAND ----------
 
+# Unity Catalog: エイリアスでモデルバージョンを管理
 client = mlflow.tracking.MlflowClient()
-for model in client.search_model_versions("name='{}'".format(config['model']['name'])):
-  if model.current_stage == 'Production':
-    print("モデルバージョン{}をアーカイブ中".format(model.version))
-    client.transition_model_version_stage(
-      name=config['model']['name'],
-      version=int(model.version),
-      stage="Archived"
-    )
-
-# COMMAND ----------
-
-client = mlflow.tracking.MlflowClient()
-client.transition_model_version_stage(
-    name=config['model']['name'],
-    version=version,
-    stage="Production"
+client.set_registered_model_alias(
+    name=uc_model_name,
+    alias="champion",
+    version=version
 )
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC モデルがプロダクション候補になったので、予測ロジックをシンプルなユーザー定義関数としてロードし、観測されたすべての市場条件に対して投資リターンを予測できます。
+# MAGIC モデルにchampionエイリアスが設定されたので、予測ロジックをシンプルなユーザー定義関数としてロードし、観測されたすべての市場条件に対して投資リターンを予測できます。
 
 # COMMAND ----------
 
 model_udf = mlflow.pyfunc.spark_udf(
-  model_uri='models:/{}/production'.format(config['model']['name']),
+  model_uri='models:/{}/champion'.format(uc_model_name),
   result_type='float',
   spark=spark
 )

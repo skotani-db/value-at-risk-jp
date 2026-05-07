@@ -14,17 +14,19 @@ with open('config/application.yaml', 'r') as f:
 
 # COMMAND ----------
 
-dbutils.fs.mkdirs(config['database']['path'])
-_ = sql("CREATE DATABASE IF NOT EXISTS {} LOCATION '{}'".format(
-  config['database']['name'],
-  config['database']['path']
+# Unity Catalog: カタログとスキーマを作成
+_ = sql("CREATE CATALOG IF NOT EXISTS {}".format(config['database']['catalog']))
+_ = sql("CREATE SCHEMA IF NOT EXISTS {}.{}".format(
+  config['database']['catalog'],
+  config['database']['schema']
 ))
 
 # COMMAND ----------
 
-# 新しく作成したデータベースをデフォルトとして使用
-# 各テーブルはこのディレクトリ配下にマネージドテーブルとして作成される
-_ = sql("USE {}".format(config['database']['name']))
+# デフォルトのカタログとスキーマを設定
+# 各テーブルはUnity Catalogのマネージドテーブルとして作成される
+_ = sql("USE CATALOG {}".format(config['database']['catalog']))
+_ = sql("USE SCHEMA {}".format(config['database']['schema']))
 
 # COMMAND ----------
 
@@ -40,11 +42,15 @@ with open('config/indicators.json', 'r') as f:
 # COMMAND ----------
 
 import mlflow
+# Unity Catalog対応のMLflowレジストリを使用
+mlflow.set_registry_uri("databricks-uc")
 username = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
 mlflow.set_experiment('/Users/{}/value_at_risk'.format(username))
 
 # COMMAND ----------
 
 def teardown():
-  _ = sql("DROP DATABASE IF EXISTS {} CASCADE".format(config['database']['name']))
-  dbutils.fs.rm(config['database']['path'], True)
+  _ = sql("DROP SCHEMA IF EXISTS {}.{} CASCADE".format(
+    config['database']['catalog'],
+    config['database']['schema']
+  ))

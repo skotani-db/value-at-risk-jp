@@ -95,8 +95,14 @@ _ = (
 # COMMAND ----------
 
 import mlflow
+# Unity Catalog: catalog.schema.model_name@alias 形式でモデルをロード
+uc_model_name = "{}.{}.{}".format(
+  config['database']['catalog'],
+  config['database']['schema'],
+  config['model']['name']
+)
 model_udf = mlflow.pyfunc.spark_udf(
-  model_uri='models:/{}/production'.format(config['model']['name']),
+  model_uri='models:/{}/champion'.format(uc_model_name),
   result_type='float',
   spark=spark
 )
