@@ -75,6 +75,7 @@ export default function MonteCarlo() {
 
   const runSimulation = async () => {
     setRunning(true); setProgress(null); setHistogram(null); setTotalTrials(0)
+    setVarData(null); setCountryData(null)
     try {
       await fetch('/api/montecarlo/run', {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -85,7 +86,8 @@ export default function MonteCarlo() {
     } catch(e) { setRunning(false) }
   }
 
-  const pct = progress?.total > 0 ? Math.round(progress.current / progress.total * 100) : 0
+  // Progress based on trial count, not job steps
+  const trialPct = numTrials > 0 ? Math.min(100, Math.round(totalTrials / numTrials * 100)) : 0
 
   // Compute VaR from histogram
   const computeVarFromHist = () => {
@@ -135,19 +137,16 @@ export default function MonteCarlo() {
           {running && progress ? (
             <div>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-                <span style={{fontSize:12,color:'var(--text-secondary)'}}>{progress.step}</span>
-                <span style={{fontSize:12,color:'var(--text-muted)'}}>{progress.current}/{progress.total}</span>
+                <span style={{fontSize:12,color:'var(--text-secondary)'}}>
+                  {totalTrials > 0 ? `${totalTrials.toLocaleString()} / ${numTrials.toLocaleString()} trials` : progress.step}
+                </span>
+                <span style={{fontSize:12,color:'var(--text-muted)'}}>{trialPct}%</span>
               </div>
-              <div style={{width:'100%',height:6,background:'var(--bg-input)',borderRadius:3,overflow:'hidden'}}>
-                <div style={{width:`${pct}%`,height:'100%',background:'linear-gradient(90deg,var(--accent-orange),var(--accent-red))',borderRadius:3,transition:'width 0.5s ease'}} />
+              <div style={{width:'100%',height:8,background:'var(--bg-input)',borderRadius:4,overflow:'hidden'}}>
+                <div style={{width:`${trialPct}%`,height:'100%',background:'linear-gradient(90deg,var(--accent-orange),var(--accent-red))',borderRadius:4,transition:'width 0.8s ease'}} />
               </div>
               {progress.run_url && (
-                <a href={progress.run_url} target="_blank" rel="noreferrer" style={{fontSize:12,color:'var(--accent-blue)',marginTop:6,display:'inline-block'}}>View Job Run</a>
-              )}
-              {totalTrials > 0 && (
-                <div style={{marginTop:8,fontSize:13,color:'var(--accent-orange)'}}>
-                  Samples collected: <strong>{totalTrials.toLocaleString()}</strong> / {numTrials.toLocaleString()}
-                </div>
+                <a href={progress.run_url} target="_blank" rel="noreferrer" style={{fontSize:12,color:'var(--accent-blue)',marginTop:8,display:'inline-block'}}>View Job Run</a>
               )}
             </div>
           ) : progress?.done ? (

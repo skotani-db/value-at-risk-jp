@@ -4,21 +4,21 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export default function Compliance() {
   const [compData, setCompData] = useState(null)
   const [summary, setSummary] = useState(null)
-  const [computing, setComputing] = useState(false)
   const [loading, setLoading] = useState(true)
 
   // Genie
-  const [genieSpaceId, setGenieSpaceId] = useState('')
+  const [genieSpaceId, setGenieSpaceId] = useState('01f14ac99ca91fbf8bf29620b27b6e49')
   const [genieQuestion, setGenieQuestion] = useState('')
   const [genieMessages, setGenieMessages] = useState([])
   const [genieLoading, setGenieLoading] = useState(false)
+  const [genieConvId, setGenieConvId] = useState(null)
 
-  const loadData = () => {
+  useEffect(() => {
     Promise.all([
-      fetch('/api/compliance/data').then(r => r.json()),
-      fetch('/api/compliance/summary').then(r => r.json()),
+      fetch('/api/compliance/data').then(r=>r.json()).catch(()=>({rows:[]})),
+      fetch('/api/compliance/summary').then(r=>r.json()).catch(()=>({rows:[]})),
     ]).then(([cd, sm]) => {
-      if (cd.rows && cd.rows.length > 0) {
+      if (cd.rows?.length > 0) {
         setCompData(cd.rows.map(r => ({
           date: r.date?.substring(0,10),
           portfolio_return: parseFloat(r.portfolio_return || 0),
@@ -28,55 +28,74 @@ export default function Compliance() {
       }
       if (sm.rows?.[0]) setSummary(sm.rows[0])
       setLoading(false)
-    }).catch(() => setLoading(false))
-  }
+    })
+  }, [])
 
-  useEffect(loadData, [])
-
-  const computeCompliance = async () => {
-    setComputing(true)
-    try {
-      await fetch('/api/compliance/compute', { method: 'POST' })
-      loadData()
-    } catch(e) { alert('Error: ' + e.message) }
-    setComputing(false)
-  }
-
-  const askGenie = () => {
+  const askGenie = async () => {
     if (!genieSpaceId || !genieQuestion) return
     setGenieLoading(true)
-    setGenieMessages(prev => [...prev, { role:'user', content: genieQuestion }])
-    fetch('/api/genie/ask', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ space_id: genieSpaceId, question: genieQuestion })
-    }).then(r => r.json()).then(data => {
+    const question = genieQuestion
+    setGenieMessages(prev => [...prev, { role:'user', content: question }])
+    setGenieQuestion('')
+
+    try {
+      const resp = await fetch('/api/genie/ask', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ space_id: genieSpaceId, question })
+      })
+      if (!resp.ok) { throw new Error(await resp.text()) }
+      const data = await resp.json()
+
       if (data.conversation_id) {
-        const poll = () => {
-          fetch(`/api/genie/result/${genieSpaceId}/${data.conversation_id}/${data.message_id}`)
-            .then(r => r.json()).then(result => {
-              if (result.status === 'COMPLETED' || result.status === 'FAILED') {
-                const text = result.result?.text || result.result?.description || 'No response'
-                const query = result.result?.query
+        setGenieConvId(data.conversation_id)
+        // Poll for result
+        const poll = async () => {
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000))
+            try {
+              const res = await fetch(`/api/genie/result/${genieSpaceId}/${data.conversation_id}/${data.message_id}`).then(r=>r.json())
+              if (res.status === 'COMPLETED') {
+                const text = res.result?.text || res.result?.description || 'Analysis complete'
+                const query = res.result?.query
                 let content = text
-                if (query) content += '\n\nSQL:\n' + query
+                if (query) content += '\n\n```sql\n' + query + '\n```'
                 setGenieMessages(prev => [...prev, { role:'assistant', content }])
                 setGenieLoading(false)
-              } else { setTimeout(poll, 2000) }
-            })
+                return
+              } else if (res.status === 'FAILED') {
+                setGenieMessages(prev => [...prev, { role:'assistant', content: 'Failed: ' + (res.result?.text || 'Unknown error') }])
+                setGenieLoading(false)
+                return
+              }
+            } catch(e) {}
+          }
+          setGenieMessages(prev => [...prev, { role:'assistant', content: 'Timeout waiting for response' }])
+          setGenieLoading(false)
         }
-        setTimeout(poll, 3000)
+        poll()
       } else {
         setGenieMessages(prev => [...prev, { role:'assistant', content: JSON.stringify(data) }])
         setGenieLoading(false)
       }
-    }).catch(e => {
+    } catch(e) {
       setGenieMessages(prev => [...prev, { role:'assistant', content: 'Error: ' + e.message }])
       setGenieLoading(false)
-    })
-    setGenieQuestion('')
+    }
   }
 
+  if (loading) return <div className="loading"><div className="spinner"/>Loading...</div>
+
   const baselColor = summary?.basel_zone === 'GREEN' ? '#22c55e' : summary?.basel_zone === 'YELLOW' ? '#eab308' : '#ef4444'
+
+  // Compute monthly breaches for chart
+  const monthlyBreaches = {}
+  compData?.forEach(d => {
+    const month = d.date?.substring(0,7)
+    if (!monthlyBreaches[month]) monthlyBreaches[month] = { month, breaches: 0, days: 0 }
+    monthlyBreaches[month].days++
+    monthlyBreaches[month].breaches += d.is_breach
+  })
+  const monthlyData = Object.values(monthlyBreaches)
 
   return (
     <div>
@@ -89,9 +108,6 @@ export default function Compliance() {
       <div className="card">
         <div className="card-header">
           <div className="card-title">Basel Traffic Light System</div>
-          <button className="btn btn-primary btn-sm" onClick={computeCompliance} disabled={computing}>
-            {computing ? 'Computing...' : 'Compute Backtest'}
-          </button>
         </div>
         <div className="grid-3">
           {[
@@ -111,7 +127,7 @@ export default function Compliance() {
           ))}
         </div>
         {summary && (
-          <div style={{marginTop:16,padding:'12px 16px',background:'var(--bg-input)',borderRadius:8,display:'flex',gap:32}}>
+          <div style={{marginTop:16,padding:'12px 16px',background:'var(--bg-input)',borderRadius:8,display:'flex',gap:32,flexWrap:'wrap'}}>
             <div><span style={{color:'var(--text-muted)',fontSize:12}}>Total Breaches:</span> <strong style={{color:baselColor}}>{summary.total_breaches}</strong></div>
             <div><span style={{color:'var(--text-muted)',fontSize:12}}>Total Days:</span> <strong>{summary.total_days}</strong></div>
             <div><span style={{color:'var(--text-muted)',fontSize:12}}>Breach Rate:</span> <strong>{summary.breach_pct}%</strong></div>
@@ -142,22 +158,48 @@ export default function Compliance() {
         </div>
       )}
 
+      {/* Monthly Breach Count */}
+      {monthlyData.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Monthly Breach Count</div>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={monthlyData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4a" />
+              <XAxis dataKey="month" stroke="#606080" tick={{fontSize:11}} />
+              <YAxis stroke="#606080" tick={{fontSize:11}} allowDecimals={false} />
+              <Tooltip contentStyle={{background:'#1a1a2e',border:'1px solid #2a2a4a',borderRadius:8}} />
+              <Line type="monotone" dataKey="breaches" stroke="#ef4444" strokeWidth={2} name="Breaches" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       {/* Genie */}
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Genie - Interactive Analysis</div>
-          <input className="form-input" style={{width:300}} placeholder="Genie Space ID"
+          <div className="card-title">Genie - Interactive Risk Analysis</div>
+          <input className="form-input" style={{width:280}} placeholder="Genie Space ID"
             value={genieSpaceId} onChange={e=>setGenieSpaceId(e.target.value)} />
         </div>
         <div className="genie-chat">
           <div className="genie-messages">
             {genieMessages.length === 0 && (
-              <div style={{textAlign:'center',color:'var(--text-muted)',padding:40,fontSize:14}}>
-                Enter Genie Space ID and ask questions about your VaR data.
-                <div style={{marginTop:12,display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}}>
-                  {['What is the worst VaR day?','Show breach count by month','Which country has highest risk?'].map(q =>
+              <div style={{textAlign:'center',color:'var(--text-muted)',padding:32,fontSize:14}}>
+                <div style={{marginBottom:8}}>Enter your Genie Space ID to start interactive analysis.</div>
+                <div style={{fontSize:12,color:'var(--text-muted)',marginBottom:12}}>
+                  The Space should have access to tables in <code style={{background:'var(--bg-input)',padding:'2px 6px',borderRadius:4}}>{genieSpaceId ? '' : 'skotani_var.var_app'}</code>
+                </div>
+                <div style={{display:'flex',gap:6,justifyContent:'center',flexWrap:'wrap'}}>
+                  {[
+                    'What is the worst VaR99 day and why?',
+                    'Show monthly breach counts',
+                    'Which dates had the largest portfolio losses?',
+                    'Summarize the risk profile',
+                  ].map(q => (
                     <button key={q} className="btn btn-outline btn-sm" onClick={()=>setGenieQuestion(q)}>{q}</button>
-                  )}
+                  ))}
                 </div>
               </div>
             )}
@@ -168,15 +210,15 @@ export default function Compliance() {
             ))}
             {genieLoading && (
               <div className="genie-message assistant">
-                <div className="spinner" style={{width:16,height:16,borderWidth:2,display:'inline-block',marginRight:8}} />Thinking...
+                <div className="spinner" style={{width:16,height:16,borderWidth:2,display:'inline-block',marginRight:8}} />Analyzing...
               </div>
             )}
           </div>
           <div className="genie-input-row">
-            <input className="form-input" placeholder={genieSpaceId?'Ask a question...':'Enter Genie Space ID first'}
+            <input className="form-input" placeholder={genieSpaceId ? 'Ask about your VaR data...' : 'Enter Genie Space ID first'}
               value={genieQuestion} onChange={e=>setGenieQuestion(e.target.value)}
               onKeyDown={e=>e.key==='Enter'&&askGenie()} disabled={!genieSpaceId} />
-            <button className="btn btn-primary" onClick={askGenie} disabled={!genieSpaceId||!genieQuestion||genieLoading}>Send</button>
+            <button className="btn btn-primary" onClick={askGenie} disabled={!genieSpaceId||!genieQuestion||genieLoading}>Ask</button>
           </div>
         </div>
       </div>

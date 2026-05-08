@@ -171,13 +171,25 @@ def _generate_data_bg(tickers, start, end):
                     SELECT date FROM dates WHERE DAYOFWEEK(date) BETWEEN 2 AND 6
                 ),
                 with_rand AS (
-                    SELECT date, RAND() as r1, RAND() as r2, RAND() as r3, RAND() as r4
+                    SELECT date, RAND() as r1, RAND() as r2, RAND() as r3, RAND() as r4, RAND() as r5
                     FROM bdays
                 ),
-                with_return AS (
+                with_regime AS (
                     SELECT date, r1, r2, r3, r4,
-                        {p[1]} + {p[2]} * (r1 - 0.5) * 3.46 as daily_ret
+                        CASE
+                            WHEN MONTH(date) IN (1,2,3) THEN 1.8
+                            WHEN MONTH(date) IN (4,5,6) THEN 0.6
+                            WHEN MONTH(date) IN (7,8) THEN 2.5
+                            WHEN MONTH(date) IN (9,10) THEN 1.2
+                            ELSE 0.8
+                        END * (1.0 + 0.5 * (r5 - 0.5)) as vol_mult,
+                        CASE WHEN r5 > 0.97 THEN 4.0 WHEN r5 < 0.03 THEN 3.0 ELSE 1.0 END as shock_mult
                     FROM with_rand
+                ),
+                with_return AS (
+                    SELECT date, r2, r3, r4,
+                        {p[1]} + {p[2]} * vol_mult * shock_mult * (r1 - 0.5) * 3.46 as daily_ret
+                    FROM with_regime
                 ),
                 cum AS (
                     SELECT date, r2, r3, r4,
@@ -207,17 +219,29 @@ def _generate_data_bg(tickers, start, end):
                 SELECT date FROM dates WHERE DAYOFWEEK(date) BETWEEN 2 AND 6
             ),
             with_rand AS (
-                SELECT date, RAND() as r1, RAND() as r2, RAND() as r3, RAND() as r4, RAND() as r5
+                SELECT date, RAND() as r1, RAND() as r2, RAND() as r3, RAND() as r4, RAND() as r5, RAND() as r6
                 FROM bdays
+            ),
+            with_regime AS (
+                SELECT *,
+                    CASE
+                        WHEN MONTH(date) IN (1,2,3) THEN 1.8
+                        WHEN MONTH(date) IN (4,5,6) THEN 0.6
+                        WHEN MONTH(date) IN (7,8) THEN 2.8
+                        WHEN MONTH(date) IN (9,10) THEN 1.5
+                        ELSE 0.7
+                    END * (1.0 + 0.4 * (r6 - 0.5)) as vol_mult,
+                    CASE WHEN r6 > 0.97 THEN 3.5 WHEN r6 < 0.03 THEN 3.0 ELSE 1.0 END as shock
+                FROM with_rand
             ),
             cum AS (
                 SELECT date,
-                    {INDICATOR_PARAMS['SP500'][0]} * EXP(SUM({INDICATOR_PARAMS['SP500'][1]} + {INDICATOR_PARAMS['SP500'][2]} * (r1-0.5)*3.46) OVER (ORDER BY date)) as SP500,
-                    {INDICATOR_PARAMS['NYSE'][0]} * EXP(SUM({INDICATOR_PARAMS['NYSE'][1]} + {INDICATOR_PARAMS['NYSE'][2]} * (r2-0.5)*3.46) OVER (ORDER BY date)) as NYSE,
-                    {INDICATOR_PARAMS['OIL'][0]} * EXP(SUM({INDICATOR_PARAMS['OIL'][1]} + {INDICATOR_PARAMS['OIL'][2]} * (r3-0.5)*3.46) OVER (ORDER BY date)) as OIL,
-                    {INDICATOR_PARAMS['TREASURY'][0]} + SUM({INDICATOR_PARAMS['TREASURY'][2]} * (r4-0.5)*3.46) OVER (ORDER BY date) as TREASURY,
-                    {INDICATOR_PARAMS['DOWJONES'][0]} * EXP(SUM({INDICATOR_PARAMS['DOWJONES'][1]} + {INDICATOR_PARAMS['DOWJONES'][2]} * (r5-0.5)*3.46) OVER (ORDER BY date)) as DOWJONES
-                FROM with_rand
+                    {INDICATOR_PARAMS['SP500'][0]} * EXP(SUM(({INDICATOR_PARAMS['SP500'][1]} + {INDICATOR_PARAMS['SP500'][2]} * vol_mult * shock * (r1-0.5)*3.46)) OVER (ORDER BY date)) as SP500,
+                    {INDICATOR_PARAMS['NYSE'][0]} * EXP(SUM(({INDICATOR_PARAMS['NYSE'][1]} + {INDICATOR_PARAMS['NYSE'][2]} * vol_mult * shock * (r2-0.5)*3.46)) OVER (ORDER BY date)) as NYSE,
+                    {INDICATOR_PARAMS['OIL'][0]} * EXP(SUM(({INDICATOR_PARAMS['OIL'][1]} + {INDICATOR_PARAMS['OIL'][2]} * vol_mult * shock * (r3-0.5)*3.46)) OVER (ORDER BY date)) as OIL,
+                    {INDICATOR_PARAMS['TREASURY'][0]} + SUM({INDICATOR_PARAMS['TREASURY'][2]} * vol_mult * shock * (r4-0.5)*3.46) OVER (ORDER BY date) as TREASURY,
+                    {INDICATOR_PARAMS['DOWJONES'][0]} * EXP(SUM(({INDICATOR_PARAMS['DOWJONES'][1]} + {INDICATOR_PARAMS['DOWJONES'][2]} * vol_mult * shock * (r5-0.5)*3.46)) OVER (ORDER BY date)) as DOWJONES
+                FROM with_regime
             )
             SELECT date, ROUND(SP500,2), ROUND(NYSE,2), ROUND(OIL,2),
                    ROUND(GREATEST(1.0, LEAST(7.0, TREASURY)),2), ROUND(DOWJONES,2)
@@ -433,6 +457,11 @@ def _run_mc_bg(mc_runs):
     try:
         # Step 1: Submit
         mc_progress.update({"current": 1, "step": "Submitting MC simulation job..."})
+        # 前回のチェックポイントをクリア
+        try:
+            run_sql(f"TRUNCATE TABLE {CATALOG}.{SCHEMA}.mc_checkpoint")
+        except Exception:
+            pass
         notebook_params = {
             "catalog": CATALOG,
             "schema": SCHEMA,
@@ -440,6 +469,7 @@ def _run_mc_bg(mc_runs):
             "model_date": MODEL_CONFIG["date"],
             "max_date": YF_CONFIG["maxdate"],
             "mc_runs": str(mc_runs),
+            "vol_window": "30",
         }
         run_resp = w.api_client.do("POST", "/api/2.1/jobs/runs/submit", body={
             "run_name": "risklens-var-monte-carlo",
@@ -550,35 +580,6 @@ def get_var_by_country():
 # API: 05 - Compliance
 # ════════════════════════════════════════════
 
-@app.post("/api/compliance/compute")
-def compute_compliance():
-    """Compute compliance backtest data."""
-    run_sql(f"""
-        CREATE OR REPLACE TABLE {FQN('compliance')} AS
-        WITH daily_returns AS (
-            SELECT date,
-                SUM(LN(close / LAG(close) OVER (PARTITION BY s.ticker ORDER BY s.date)) * p.weight) as portfolio_return
-            FROM {FQN('stocks')} s
-            JOIN {FQN('portfolio')} p ON s.ticker = p.ticker
-            WHERE s.close IS NOT NULL
-            GROUP BY date
-        ),
-        with_var AS (
-            SELECT d.date, d.portfolio_return, v.var_99
-            FROM daily_returns d
-            LEFT JOIN {FQN('var_timeseries')} v ON d.date = v.date
-        )
-        SELECT date, portfolio_return, var_99,
-            CASE
-                WHEN portfolio_return < var_99 THEN 1 ELSE 0
-            END as is_breach
-        FROM with_var
-        WHERE portfolio_return IS NOT NULL
-        ORDER BY date
-    """)
-    return {"status": "ok"}
-
-
 @app.get("/api/compliance/data")
 def get_compliance_data():
     return run_sql(f"SELECT * FROM {FQN('compliance')} ORDER BY date")
@@ -588,8 +589,8 @@ def get_compliance_data():
 def get_compliance_summary():
     return run_sql(f"""
         SELECT
-            SUM(is_breach) as total_breaches,
-            COUNT(*) as total_days,
+            CAST(SUM(is_breach) AS INT) as total_breaches,
+            CAST(COUNT(*) AS INT) as total_days,
             ROUND(SUM(is_breach) * 100.0 / COUNT(*), 2) as breach_pct,
             CASE
                 WHEN SUM(is_breach) <= 4 THEN 'GREEN'
