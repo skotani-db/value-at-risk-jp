@@ -102,7 +102,7 @@ uc_model_name = "{}.{}.{}".format(
   config['model']['name']
 )
 model_udf = mlflow.pyfunc.spark_udf(
-  model_uri='models:/{}/champion'.format(uc_model_name),
+  model_uri='models:/{uc_model_name}@champion'.format(uc_model_name=uc_model_name),
   result_type='float',
   spark=spark
 )
@@ -161,11 +161,13 @@ _ = (
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC 最後に、テーブルを高速読み取り用に最適化することで、データアセットの特定のスライスを容易に抽出できるようにします。これはDeltaの`OPTIMIZE`コマンドによって実現されます。
+# MAGIC    
+# MAGIC 最後に、テーブルにLiquid Clusteringを適用することで、データアセットの特定のスライスを高速に抽出できるようにします。`CLUSTER BY`で`date`と`ticker`をクラスタリングキーに指定し、`OPTIMIZE`を実行します。
 
 # COMMAND ----------
 
-_ = sql('OPTIMIZE {} ZORDER BY (`date`, `ticker`)'.format(config['database']['tables']['mc_trials']))
+_ = sql('ALTER TABLE {} CLUSTER BY (`date`, `ticker`)'.format(config['database']['tables']['mc_trials']))
+_ = sql('OPTIMIZE {}'.format(config['database']['tables']['mc_trials']))
 
 # COMMAND ----------
 

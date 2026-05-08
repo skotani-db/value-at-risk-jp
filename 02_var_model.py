@@ -15,12 +15,11 @@ model_date = datetime.datetime.strptime(config['model']['date'], '%Y-%m-%d')
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC モデルの追加アーティファクトを保存するための一時ディレクトリを作成します。
+# MAGIC `mlflow.log_figure()`を使用して、matplotlibのfigureを直接MLflowに記録します。一時ディレクトリへの保存は不要です。
 
 # COMMAND ----------
 
-import tempfile
-tempDir = tempfile.TemporaryDirectory()
+# mlflow.log_figure() を使用するため、一時ディレクトリは不要
 
 # COMMAND ----------
 
@@ -82,9 +81,8 @@ import matplotlib.pyplot as plt
 # pandasでシンプルに相関行列をプロット（マーケットファクターはメモリに収まる）
 # マーケットファクターは相関がないと仮定（NASDAQとSP500は相関あり、原油と国債も同様）
 f_cor_pdf = market_pd.corr(method='spearman', min_periods=12)
-sns.set(rc={'figure.figsize':(11,8)})
-sns.heatmap(f_cor_pdf, annot=True)
-plt.savefig('{}/factor_correlation.png'.format(tempDir.name))
+fig_corr, ax_corr = plt.subplots(figsize=(11, 8))
+sns.heatmap(f_cor_pdf, annot=True, ax=ax_corr)
 plt.show()
 
 # COMMAND ----------
@@ -191,9 +189,15 @@ class RiskMLFlowModel(PythonModel):
 
 from mlflow.models.signature import infer_signature
 
+# Unity Catalog モデル名을 定義
+uc_model_name = "{}.{}.{}".format(
+  config['database']['catalog'],
+  config['database']['schema'],
+  config['model']['name']
+)
+
 with mlflow.start_run(run_name='value-at-risk') as run:
 
-  # MLflow実行IDを取得
   run_id = run.info.run_id
 
   # pyfuncモデルを作成
@@ -204,19 +208,46 @@ with mlflow.start_run(run_name='value-at-risk') as run:
   model_output_df = python_model.predict(None, model_input_df)
   model_signature = infer_signature(model_input_df, model_output_df)
 
-  # モデルをMLflowに記録
-  mlflow.pyfunc.log_model(
+  # モデルをログ + Unity Catalogに直接登録（一回だけ）
+  model_info = mlflow.pyfunc.log_model(
     artifact_path="model",
     python_model=python_model,
-    signature=model_signature
+    signature=model_signature,
+    code_paths=["utils"],
+    registered_model_name=uc_model_name
   )
 
-  # 追加アーティファクトを記録
-  mlflow.log_artifact("{}/factor_correlation.png".format(tempDir.name))
+  # champion エイリアスを設定
+  client = mlflow.tracking.MlflowClient()
+  client.set_registered_model_alias(
+    name=uc_model_name,
+    alias="champion",
+    version=model_info.registered_model_version
+  )
+
+  # 相関行列プロットを記録
+  mlflow.log_figure(fig_corr, "factor_correlation.png")
+
+  print(f"✅ モデル登録完了: {uc_model_name} v{model_info.registered_model_version} (champion)")
 
 # COMMAND ----------
 
-model_udf = mlflow.pyfunc.spark_udf(model_uri='runs:/{}/model'.format(run_id), result_type='float', spark=spark)
+# MAGIC %md
+# MAGIC モデルをUnity Catalogに登録することで、次のノートブック（モンテカルロシミュレーション）などの下流プロセスやバックエンドジョブで利用可能になります。
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Unity Catalogではステージの代わりにエイリアスを使用してモデルバージョンを管理します。ここでは最新モデルに`champion`エイリアスを設定し、下流プロセスで利用可能にします。
+
+# COMMAND ----------
+
+# Unity Catalogの登録済みモデルから直接ロード（分散実行）
+model_udf = mlflow.pyfunc.spark_udf(
+  model_uri='models:/{}@champion'.format(uc_model_name),
+  result_type='float',
+  spark=spark
+)
 prediction_df = features_df.withColumn('predicted', model_udf(F.struct('ticker', 'features')))
 display(prediction_df)
 
@@ -234,12 +265,12 @@ wsse_df = prediction_df \
 wsse = wsse_df.select(F.avg('wsse').alias('wsse')).toPandas().iloc[0].wsse
 
 # 各銘柄のモデル精度を平均二乗誤差でプロット
-ax = wsse_df.toPandas().plot.bar(x='ticker', y='wsse', rot=0, label=None, figsize=(24,5))
-ax.get_legend().remove()
-plt.title("各銘柄のモデルWSSE")
+fig_wsse, ax_wsse = plt.subplots(figsize=(24, 5))
+wsse_df.toPandas().plot.bar(x='ticker', y='wsse', rot=0, label=None, ax=ax_wsse)
+ax_wsse.get_legend().remove()
+ax_wsse.set_title("各銘柄のモデルWSSE")
 plt.xticks(rotation=45)
 plt.ylabel("wsse")
-plt.savefig("{}/model_wsse.png".format(tempDir.name))
 plt.show()
 
 # COMMAND ----------
@@ -251,7 +282,7 @@ plt.show()
 
 with mlflow.start_run(run_id=run_id) as run:
   mlflow.log_metric("wsse", wsse)
-  mlflow.log_artifact("{}/model_wsse.png".format(tempDir.name))
+  mlflow.log_figure(fig_wsse, "model_wsse.png")
 
 # COMMAND ----------
 
@@ -266,48 +297,7 @@ with mlflow.start_run(run_id=run_id) as run:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC モデルをMLレジストリに登録することで、次のノートブック（モンテカルロシミュレーション）などの下流プロセスやバックエンドジョブで利用可能になります。
-
-# COMMAND ----------
-
-client = mlflow.tracking.MlflowClient()
-model_uri = "runs:/{}/model".format(run_id)
-# Unity Catalog: catalog.schema.model_name 形式で登録
-uc_model_name = "{}.{}.{}".format(
-  config['database']['catalog'],
-  config['database']['schema'],
-  config['model']['name']
-)
-result = mlflow.register_model(model_uri, uc_model_name)
-version = result.version
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Unity Catalogではステージの代わりにエイリアスを使用してモデルバージョンを管理します。ここでは最新モデルに`champion`エイリアスを設定し、下流プロセスで利用可能にします。
-
-# COMMAND ----------
-
-# Unity Catalog: エイリアスでモデルバージョンを管理
-client = mlflow.tracking.MlflowClient()
-client.set_registered_model_alias(
-    name=uc_model_name,
-    alias="champion",
-    version=version
-)
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC モデルにchampionエイリアスが設定されたので、予測ロジックをシンプルなユーザー定義関数としてロードし、観測されたすべての市場条件に対して投資リターンを予測できます。
-
-# COMMAND ----------
-
-model_udf = mlflow.pyfunc.spark_udf(
-  model_uri='models:/{}/champion'.format(uc_model_name),
-  result_type='float',
-  spark=spark
-)
 
 # COMMAND ----------
 
@@ -329,10 +319,6 @@ plt.title('ECの対数リターン')
 plt.ylabel('対数リターン')
 plt.xlabel('日付')
 plt.show()
-
-# COMMAND ----------
-
-tempDir.cleanup()
 
 # COMMAND ----------
 

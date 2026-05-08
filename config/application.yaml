@@ -8,7 +8,7 @@ model:
   # Unity Catalogに登録されるモデルの名前（catalog.schema.model_name 形式で自動構成）
   name: 'value_at_risk'
   # モデルを訓練する日付（yfinanceの終了日より前）
-  date: '2019-09-01'
+  date: '2026-04-01'
 
 database:
   # Unity Catalog の3レベル名前空間（catalog.schema.table）
