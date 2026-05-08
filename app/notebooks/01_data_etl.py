@@ -112,8 +112,10 @@ def download_ticker(tick, min_date, max_date, retries=3):
                 print(f"  ⚠️ {tick}: No data returned")
                 return None
 
+            # timezone除去（yfinanceはtz-awareを返す）
+            data.index = data.index.tz_localize(None)
             # 欠損日を前方補完
-            idx = pd.date_range(min_date, max_date, freq='B')
+            idx = pd.bdate_range(min_date, max_date)
             data = data.reindex(idx, method='pad')
             data['date'] = data.index
             data['ticker'] = tick
@@ -241,7 +243,13 @@ for symbol, name in market_indicators.items():
 
 # 指標データを結合
 if indicator_dfs:
-    indicators_pdf = pd.DataFrame(indicator_dfs)
+    # timezone除去
+    clean_dfs = {}
+    for name, series in indicator_dfs.items():
+        s = series.copy()
+        s.index = s.index.tz_localize(None)
+        clean_dfs[name] = s
+    indicators_pdf = pd.DataFrame(clean_dfs)
     indicators_pdf['date'] = indicators_pdf.index
     indicators_pdf = indicators_pdf.dropna()
 
@@ -253,9 +261,33 @@ if indicator_dfs:
             base = {'SP500':5200,'NYSE':18000,'OIL':78,'TREASURY':4.3,'DOWJONES':39000}.get(name, 100)
             indicators_pdf[name] = base * np.exp(np.cumsum(np.random.normal(0, 0.01, n)))
 
+    if len(indicators_pdf) > 0:
+        spark.sql(f"DROP TABLE IF EXISTS {fqn('market_indicators')}")
+        spark.createDataFrame(indicators_pdf).write.format("delta").saveAsTable(fqn("market_indicators"))
+        print(f"✅ market_indicators saved: {len(indicators_pdf)} rows")
+    else:
+        print("⚠️ No indicator data, generating all dummies...")
+
+# 全指標がダウンロード失敗した場合のフォールバック
+try:
+    spark.table(fqn("market_indicators"))
+except Exception:
+    print("Generating full dummy market indicators...")
+    dates = pd.bdate_range(start_date, end_date)
+    n = len(dates)
+    np.random.seed(42)
+    dummy_ind = pd.DataFrame({
+        'date': dates,
+        'SP500': 5200 * np.exp(np.cumsum(np.random.normal(0.0003, 0.011, n))),
+        'NYSE': 18000 * np.exp(np.cumsum(np.random.normal(0.0002, 0.009, n))),
+        'OIL': 78 * np.exp(np.cumsum(np.random.normal(0, 0.022, n))),
+        'TREASURY': 4.3 + np.cumsum(np.random.normal(0, 0.008, n)),
+        'DOWJONES': 39000 * np.exp(np.cumsum(np.random.normal(0.0003, 0.01, n))),
+    })
+    dummy_ind['TREASURY'] = dummy_ind['TREASURY'].clip(1.0, 7.0)
     spark.sql(f"DROP TABLE IF EXISTS {fqn('market_indicators')}")
-    spark.createDataFrame(indicators_pdf).write.format("delta").saveAsTable(fqn("market_indicators"))
-    print(f"✅ market_indicators saved: {len(indicators_pdf)} rows")
+    spark.createDataFrame(dummy_ind).write.format("delta").saveAsTable(fqn("market_indicators"))
+    print(f"✅ Dummy market_indicators saved: {len(dummy_ind)} rows")
 
 # COMMAND ----------
 
