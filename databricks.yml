@@ -1,0 +1,67 @@
+bundle:
+  name: value-at-risk-app
+
+resources:
+  apps:
+    var-dashboard:
+      name: "var-dashboard"
+      description: "Value at Risk interactive dashboard"
+      source_code_path: ./app
+      config:
+        - name: DATABRICKS_WAREHOUSE_ID
+          description: "SQL Warehouse ID for query execution"
+
+  jobs:
+    var-pipeline:
+      name: "var-pipeline"
+      tasks:
+        - task_key: "01_market_etl"
+          notebook_task:
+            notebook_path: ./01_var_market_etl.py
+          existing_cluster_id: ${var.cluster_id}
+        - task_key: "02_model"
+          depends_on:
+            - task_key: "01_market_etl"
+          notebook_task:
+            notebook_path: ./02_var_model.py
+          existing_cluster_id: ${var.cluster_id}
+        - task_key: "03_monte_carlo"
+          depends_on:
+            - task_key: "02_model"
+          notebook_task:
+            notebook_path: ./03_var_monte_carlo.py
+          existing_cluster_id: ${var.cluster_id}
+        - task_key: "04_aggregation"
+          depends_on:
+            - task_key: "03_monte_carlo"
+          notebook_task:
+            notebook_path: ./04_var_aggregation.py
+          existing_cluster_id: ${var.cluster_id}
+        - task_key: "05_compliance"
+          depends_on:
+            - task_key: "04_aggregation"
+          notebook_task:
+            notebook_path: ./05_var_compliance.py
+          existing_cluster_id: ${var.cluster_id}
+
+variables:
+  cluster_id:
+    description: "Cluster ID for running notebooks"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      cluster_id: ${var.cluster_id}
+      workspace_host: ""
+
+  prod:
+    mode: production
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      cluster_id: ${var.cluster_id}
+      workspace_host: ""
