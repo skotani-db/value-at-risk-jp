@@ -18,7 +18,8 @@ w = WorkspaceClient()
 
 # In-memory progress tracking
 etl_progress = {"running": False, "current": 0, "total": 0, "current_ticker": "", "done": False, "error": None}
-model_progress = {"running": False, "current": 0, "total": 4, "step": "", "done": False, "error": None}
+model_progress = {"running": False, "current": 0, "total": 3, "step": "", "done": False, "error": None}
+mc_progress = {"running": False, "current": 0, "total": 3, "step": "", "done": False, "error": None, "run_url": None}
 
 # Resolve workspace host from SDK
 try:
@@ -328,7 +329,7 @@ def _train_model_bg():
             "environments": [{
                 "environment_key": "Default",
                 "spec": {
-                    "client": "1",
+                    "client": "5",
                 },
             }],
         })
@@ -421,141 +422,114 @@ def get_model_urls():
 # API: 03 - Monte Carlo Simulation
 # ════════════════════════════════════════════
 
+MC_NOTEBOOK_PATH = "/Workspace/Users/shotaro.kotani@databricks.com/risklens-var/notebooks/03_monte_carlo.py"
+
+
+def _run_mc_bg(mc_runs):
+    """Background task: kick off MC notebook as a serverless job."""
+    global mc_progress
+    mc_progress = {"running": True, "current": 0, "total": 3, "step": "Submitting job...", "done": False, "error": None, "run_url": None}
+    import time
+    try:
+        # Step 1: Submit
+        mc_progress.update({"current": 1, "step": "Submitting MC simulation job..."})
+        notebook_params = {
+            "catalog": CATALOG,
+            "schema": SCHEMA,
+            "model_name": MODEL_CONFIG["name"],
+            "model_date": MODEL_CONFIG["date"],
+            "max_date": YF_CONFIG["maxdate"],
+            "mc_runs": str(mc_runs),
+        }
+        run_resp = w.api_client.do("POST", "/api/2.1/jobs/runs/submit", body={
+            "run_name": "risklens-var-monte-carlo",
+            "tasks": [{
+                "task_key": "monte_carlo",
+                "notebook_task": {
+                    "notebook_path": MC_NOTEBOOK_PATH,
+                    "base_parameters": notebook_params,
+                    "source": "WORKSPACE",
+                },
+                "environment_key": "Default",
+            }],
+            "environments": [{
+                "environment_key": "Default",
+                "spec": {"client": "5"},
+            }],
+        })
+        job_run_id = run_resp.get("run_id")
+        print(f"[MC] Job submitted: run_id={job_run_id}")
+
+        # Step 2: Poll
+        mc_progress.update({"current": 2, "step": "Simulation in progress..."})
+        while True:
+            time.sleep(10)
+            run_info = w.api_client.do("GET", "/api/2.1/jobs/runs/get", query={"run_id": str(job_run_id)})
+            state = run_info.get("state", {})
+            life_cycle = state.get("life_cycle_state", "UNKNOWN")
+            result = state.get("result_state")
+            mc_progress["step"] = f"Job: {life_cycle}"
+            mc_progress["run_url"] = run_info.get("run_page_url", "")
+            print(f"[MC] Job status: {life_cycle} / {result}")
+
+            if life_cycle in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+                if result == "SUCCESS":
+                    break
+                else:
+                    error_msg = state.get("state_message", "Unknown error")
+                    raise Exception(f"Job failed: {result} - {error_msg}")
+
+        # Step 3: Done
+        mc_progress.update({"current": 3, "step": "Done"})
+        mc_progress["done"] = True
+        mc_progress["running"] = False
+
+    except Exception as e:
+        print(f"[MC] ERROR: {e}")
+        mc_progress["error"] = str(e)
+        mc_progress["running"] = False
+
+
 class MCRequest(BaseModel):
-    num_trials: int = 32000
-    confidence: int = 99
+    num_trials: int = 5000
 
 
-@app.post("/api/montecarlo/step")
-def mc_simulation_step(num_trials: int = Query(default=1000), confidence: int = Query(default=99)):
-    """Run MC simulation with given # of trials and return histogram + VaR."""
-    result = run_sql(f"""
-        WITH factor_stats AS (
-            SELECT
-                STDDEV(sp500_ret) as std_sp500,
-                STDDEV(nyse_ret) as std_nyse,
-                STDDEV(oil_ret) as std_oil,
-                STDDEV(treasury_ret) as std_treasury,
-                STDDEV(dowjones_ret) as std_dowjones
-            FROM {FQN('indicator_returns')}
-            WHERE sp500_ret IS NOT NULL
-        ),
-        trials AS (
-            SELECT EXPLODE(SEQUENCE(1, {num_trials})) as trial_id
-        ),
-        sim AS (
-            SELECT
-                t.trial_id,
-                p.ticker,
-                p.weight,
-                m.alpha
-                + m.beta_sp500 * fs.std_sp500 * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_oil * fs.std_oil * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_treasury * fs.std_treasury * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                as sim_return
-            FROM trials t
-            CROSS JOIN {FQN('portfolio')} p
-            JOIN {FQN('model_weights')} m ON p.ticker = m.ticker
-            CROSS JOIN factor_stats fs
-        ),
-        portfolio_returns AS (
-            SELECT trial_id, SUM(sim_return * weight) as total_return
-            FROM sim GROUP BY trial_id
-        )
-        SELECT
-            ROUND(total_return * 500) / 500 as bucket,
-            COUNT(*) as frequency
-        FROM portfolio_returns
-        GROUP BY 1 ORDER BY 1
-    """)
-
-    var_result = run_sql(f"""
-        WITH factor_stats AS (
-            SELECT STDDEV(sp500_ret) as std_sp500, STDDEV(nyse_ret) as std_nyse,
-                   STDDEV(oil_ret) as std_oil, STDDEV(treasury_ret) as std_treasury,
-                   STDDEV(dowjones_ret) as std_dowjones
-            FROM {FQN('indicator_returns')} WHERE sp500_ret IS NOT NULL
-        ),
-        trials AS (SELECT EXPLODE(SEQUENCE(1, {num_trials})) as trial_id),
-        sim AS (
-            SELECT t.trial_id, p.weight,
-                m.alpha
-                + m.beta_sp500 * fs.std_sp500 * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_oil * fs.std_oil * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_treasury * fs.std_treasury * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                as sim_return
-            FROM trials t CROSS JOIN {FQN('portfolio')} p
-            JOIN {FQN('model_weights')} m ON p.ticker = m.ticker
-            CROSS JOIN factor_stats fs
-        ),
-        pr AS (SELECT trial_id, SUM(sim_return * weight) as total_return FROM sim GROUP BY trial_id)
-        SELECT
-            ROUND(PERCENTILE(total_return, {(100-confidence)/100.0}), 6) as var_value,
-            ROUND(AVG(CASE WHEN total_return <= PERCENTILE(total_return, {(100-confidence)/100.0}) THEN total_return END), 6) as expected_shortfall,
-            ROUND(AVG(total_return), 6) as mean_return,
-            ROUND(STDDEV(total_return), 6) as std_return,
-            COUNT(*) as num_trials
-        FROM pr
-    """)
-
-    return {"histogram": result, "stats": var_result}
+@app.post("/api/montecarlo/run")
+def run_monte_carlo(req: MCRequest):
+    if mc_progress["running"]:
+        raise HTTPException(409, "MC simulation already in progress")
+    thread = threading.Thread(target=_run_mc_bg, args=(req.num_trials,))
+    thread.start()
+    return {"status": "started"}
 
 
-@app.post("/api/montecarlo/persist")
-def mc_persist(req: MCRequest):
-    """Run full MC simulation and persist results for aggregation."""
+@app.get("/api/montecarlo/progress")
+def get_mc_progress():
+    return mc_progress
 
-    # Portfolio returns per date
-    run_sql(f"""
-        CREATE OR REPLACE TABLE {FQN('mc_portfolio_returns')} AS
-        WITH dates AS (
-            SELECT DISTINCT date FROM {FQN('stocks')}
-            WHERE date >= '{MODEL_CONFIG["date"]}'
-        ),
-        factor_stats AS (
-            SELECT STDDEV(sp500_ret) as std_sp500, STDDEV(oil_ret) as std_oil,
-                   STDDEV(treasury_ret) as std_treasury
-            FROM {FQN('indicator_returns')} WHERE sp500_ret IS NOT NULL
-        ),
-        trials AS (SELECT EXPLODE(SEQUENCE(1, {req.num_trials})) as trial_id),
-        sim AS (
-            SELECT d.date, t.trial_id, p.ticker, p.weight, p.country,
-                m.alpha
-                + m.beta_sp500 * fs.std_sp500 * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_oil * fs.std_oil * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                + m.beta_treasury * fs.std_treasury * (SQRT(-2*LN(GREATEST(RAND(),1e-10)))*COS(2*3.14159265359*RAND()))
-                as sim_return
-            FROM dates d CROSS JOIN trials t
-            CROSS JOIN {FQN('portfolio')} p
-            JOIN {FQN('model_weights')} m ON p.ticker = m.ticker
-            CROSS JOIN factor_stats fs
-        )
-        SELECT date, trial_id, country,
-            SUM(sim_return * weight) as portfolio_return
-        FROM sim GROUP BY date, trial_id, country
-    """)
 
-    # VaR timeseries
-    run_sql(f"""
-        CREATE OR REPLACE TABLE {FQN('var_timeseries')} AS
-        SELECT date,
-            ROUND(PERCENTILE(portfolio_return, 0.01), 6) as var_99,
-            ROUND(AVG(CASE WHEN portfolio_return <= PERCENTILE(portfolio_return, 0.01) THEN portfolio_return END), 6) as es_99,
-            COUNT(*) as num_trials
-        FROM {FQN('mc_portfolio_returns')}
-        GROUP BY date ORDER BY date
-    """)
+@app.get("/api/montecarlo/params")
+def get_mc_params():
+    return {
+        "runs": MC_CONFIG["runs"],
+        "volatility_window": MC_CONFIG["volatility"],
+        "model_date": MODEL_CONFIG["date"],
+        "max_date": YF_CONFIG["maxdate"],
+    }
 
-    # VaR by country
-    run_sql(f"""
-        CREATE OR REPLACE TABLE {FQN('var_by_country')} AS
-        SELECT date, country,
-            ROUND(PERCENTILE(portfolio_return, 0.01), 6) as var_99
-        FROM {FQN('mc_portfolio_returns')}
-        GROUP BY date, country ORDER BY date, country
-    """)
 
-    return {"status": "ok"}
+@app.get("/api/montecarlo/checkpoint")
+def get_mc_checkpoint():
+    """Get latest MC checkpoint histogram for live visualization."""
+    try:
+        result = run_sql(f"SELECT bucket, frequency, total_trials, checkpoint_id FROM {CATALOG}.{SCHEMA}.mc_checkpoint ORDER BY bucket")
+        # Also update mc_progress with trial count
+        if result.get("rows"):
+            total = int(result["rows"][0].get("total_trials", 0))
+            mc_progress["step"] = f"Simulating... ({total:,} trials)"
+        return result
+    except Exception:
+        return {"columns": [], "rows": []}
 
 
 # ════════════════════════════════════════════
