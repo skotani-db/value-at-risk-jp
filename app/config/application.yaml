@@ -1,30 +1,27 @@
+database:
+  catalog: 'skotani_var'
+  schema: 'var_app'
+  tables:
+    portfolio: 'portfolio'
+    stocks: 'market_data'
+    indicators: 'market_indicators'
+    stock_returns: 'stock_returns'
+    indicator_returns: 'indicator_returns'
+    model_weights: 'model_weights'
+    mc_portfolio_returns: 'mc_portfolio_returns'
+    var_timeseries: 'var_timeseries'
+    var_by_country: 'var_by_country'
+    compliance: 'compliance_backtest'
+
+model:
+  name: 'value_at_risk'
+  date: '2026-04-01'
+
 yfinance:
-  # ソリューションはインクリメンタルに実行される可能性がありますが
-  # インサイトを得るのに十分な過去データを確保します
   mindate: '2024-05-01'
   maxdate: '2026-05-01'
 
-model:
-  # Unity Catalogに登録されるモデルの名前（catalog.schema.model_name 形式で自動構成）
-  name: 'value_at_risk'
-  # モデルを訓練する日付（yfinanceの終了日より前）
-  date: '2026-04-01'
-
-database:
-  # Unity Catalog の3レベル名前空間（catalog.schema.table）
-  catalog: 'shotkotani_demo_ws'
-  schema: 'solacc_var'
-  tables:
-    stocks: 'market_data'
-    indicators: 'market_indicators'
-    volatility: 'market_volatility'
-    mc_market: 'monte_carlo_market'
-    mc_trials: 'monte_carlo_trials'
-
 monte-carlo:
-  # 利用可能なノード数の制御
   executors: 20
-  # 過去のボラティリティ計算に使用する履歴期間（日数）
   volatility: 90
-  # 各銘柄のシミュレーション回数
   runs: 32000

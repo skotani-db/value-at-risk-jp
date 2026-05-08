@@ -7,4 +7,8 @@ command:
   - "8000"
 env:
   - name: DATABRICKS_WAREHOUSE_ID
-    description: "SQL Warehouse ID for query execution"
+    value: "e9b34f7a2e4b0561"
+  - name: MLFLOW_ENABLE_DB_SDK
+    value: "true"
+  - name: MLFLOW_TRACKING_URI
+    value: "databricks"

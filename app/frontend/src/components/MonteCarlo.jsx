@@ -1,193 +1,190 @@
-import { useState, useEffect } from 'react'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Legend,
-} from 'recharts'
+import { useState, useEffect, useRef } from 'react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+
+const STEPS = [500, 2000, 8000, 32000]
 
 export default function MonteCarlo() {
-  const [params, setParams] = useState(null)
-  const [varData, setVarData] = useState(null)
-  const [trialsSummary, setTrialsSummary] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [confidence, setConfidence] = useState(99)
-  const [loadingVar, setLoadingVar] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [currentStep, setCurrentStep] = useState(-1)
+  const [histogram, setHistogram] = useState(null)
+  const [stats, setStats] = useState(null)
+  const [stepHistory, setStepHistory] = useState([])
+  const cancelRef = useRef(false)
 
-  // Editable params for display
-  const [editRuns, setEditRuns] = useState(32000)
-  const [editVol, setEditVol] = useState(90)
+  const runProgressive = async () => {
+    setRunning(true)
+    cancelRef.current = false
+    setStepHistory([])
+    setHistogram(null)
+    setStats(null)
 
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/montecarlo/params').then(r => r.json()),
-      fetch('/api/montecarlo/trials/summary').then(r => r.json()),
-    ]).then(([p, ts]) => {
-      setParams(p)
-      setEditRuns(p.runs)
-      setEditVol(p.volatility_window)
-      setTrialsSummary(ts)
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [])
-
-  const fetchVar = () => {
-    setLoadingVar(true)
-    fetch(`/api/montecarlo/var?confidence=${confidence}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.rows) {
-          setVarData(data.rows.map(r => ({
-            date: r.date?.substring(0, 10),
-            var_value: parseFloat(r.var_value),
-            num_simulations: parseInt(r.num_simulations),
+    for (let i = 0; i < STEPS.length; i++) {
+      if (cancelRef.current) break
+      setCurrentStep(i)
+      try {
+        const r = await fetch(`/api/montecarlo/step?num_trials=${STEPS[i]}&confidence=${confidence}`, { method: 'POST' })
+        const data = await r.json()
+        if (data.histogram?.rows) {
+          setHistogram(data.histogram.rows.map(r => ({
+            bucket: parseFloat(r.bucket),
+            frequency: parseInt(r.frequency),
           })))
         }
-        setLoadingVar(false)
-      })
-      .catch(() => setLoadingVar(false))
+        if (data.stats?.rows?.[0]) {
+          const s = data.stats.rows[0]
+          const stat = {
+            trials: STEPS[i],
+            var_value: parseFloat(s.var_value || 0),
+            expected_shortfall: parseFloat(s.expected_shortfall || 0),
+            mean_return: parseFloat(s.mean_return || 0),
+            std_return: parseFloat(s.std_return || 0),
+          }
+          setStats(stat)
+          setStepHistory(prev => [...prev, stat])
+        }
+      } catch(e) { console.error(e) }
+    }
+    setRunning(false)
+    setCurrentStep(-1)
   }
 
-  if (loading) return <div className="loading"><div className="spinner" /> Loading...</div>
+  const persistResults = async () => {
+    setRunning(true)
+    try {
+      await fetch('/api/montecarlo/persist', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ num_trials: 1000, confidence })
+      })
+      alert('Results persisted to Delta tables for Aggregation page')
+    } catch(e) { alert('Error: ' + e.message) }
+    setRunning(false)
+  }
 
   return (
     <div>
       <div className="page-header">
         <h1>03 - Monte Carlo Simulation</h1>
-        <p>Parallel simulation engine using market volatility distributions</p>
+        <p>Progressive simulation with real-time distribution refinement</p>
       </div>
 
-      {/* Parameters */}
+      {/* Controls */}
       <div className="grid-2">
         <div className="card">
-          <div className="card-header">
-            <div className="card-title">Simulation Parameters</div>
+          <div className="card-title" style={{marginBottom:16}}>Simulation Parameters</div>
+          <div className="form-group">
+            <label className="form-label">Confidence Level</label>
+            <select className="form-select" value={confidence} onChange={e=>setConfidence(parseInt(e.target.value))}>
+              <option value={95}>95%</option>
+              <option value={97}>97.5%</option>
+              <option value={99}>99%</option>
+            </select>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="form-group">
-              <label className="form-label">Trials per Ticker</label>
-              <input
-                type="number"
-                className="form-input"
-                value={editRuns}
-                onChange={e => setEditRuns(parseInt(e.target.value) || 0)}
-              />
+          <div className="form-group">
+            <label className="form-label">Progressive Steps</label>
+            <div style={{fontSize:13,color:'var(--text-secondary)'}}>
+              {STEPS.map((s,i) => (
+                <span key={s} style={{
+                  color: i === currentStep ? 'var(--accent-blue)' :
+                         i < currentStep || (currentStep === -1 && stepHistory.length > i) ? 'var(--accent-green)' : 'var(--text-muted)',
+                  fontWeight: i === currentStep ? 700 : 400,
+                }}>
+                  {s.toLocaleString()}{i < STEPS.length - 1 ? ' → ' : ' trials'}
+                </span>
+              ))}
             </div>
-            <div className="form-group">
-              <label className="form-label">Volatility Window (days)</label>
-              <input
-                type="number"
-                className="form-input"
-                value={editVol}
-                onChange={e => setEditVol(parseInt(e.target.value) || 0)}
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Confidence Level (%)</label>
-              <select
-                className="form-select"
-                value={confidence}
-                onChange={e => setConfidence(parseInt(e.target.value))}
-              >
-                <option value={95}>95%</option>
-                <option value={97}>97.5%</option>
-                <option value={99}>99%</option>
-              </select>
-            </div>
-            <button className="btn btn-primary" onClick={fetchVar} disabled={loadingVar}>
-              {loadingVar ? 'Calculating...' : 'Calculate VaR'}
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary" onClick={runProgressive} disabled={running}>
+              {running ? `Running... (${STEPS[currentStep]?.toLocaleString() || ''})` : 'Run Simulation'}
             </button>
+            {stepHistory.length > 0 && (
+              <button className="btn btn-outline" onClick={persistResults} disabled={running}>
+                Persist to Delta
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Live Stats */}
         <div className="card">
-          <div className="card-header">
-            <div className="card-title">Current Configuration</div>
+          <div className="card-title" style={{marginBottom:16}}>
+            {stats ? `VaR${confidence} Results` : 'Waiting for simulation...'}
           </div>
-          {params && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="grid-2">
-                <div>
-                  <div className="stat-label">Executors</div>
-                  <div className="stat-value blue" style={{ fontSize: 24 }}>{params.executors}</div>
-                </div>
-                <div>
-                  <div className="stat-label">Total Trials</div>
-                  <div className="stat-value purple" style={{ fontSize: 24 }}>{params.runs.toLocaleString()}</div>
-                </div>
+          {stats ? (
+            <div className="grid-2">
+              <div>
+                <div className="stat-label">VaR{confidence}</div>
+                <div className="stat-value red" style={{fontSize:22}}>{stats.var_value.toFixed(6)}</div>
               </div>
               <div>
-                <div className="stat-label">Data Range</div>
-                <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-                  {params.data_range.min} ~ {params.data_range.max}
-                </div>
+                <div className="stat-label">Expected Shortfall</div>
+                <div className="stat-value" style={{fontSize:22,color:'var(--accent-orange)'}}>{stats.expected_shortfall.toFixed(6)}</div>
               </div>
               <div>
-                <div className="stat-label">Model Date</div>
-                <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-                  {params.model_date}
-                </div>
+                <div className="stat-label">Mean Return</div>
+                <div style={{fontSize:18,fontWeight:600}}>{stats.mean_return.toFixed(6)}</div>
               </div>
               <div>
-                <div className="stat-label">Sampling Method</div>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                  Multivariate Normal Distribution<br/>
-                  (Cholesky decomposition for correlated factors)
-                </div>
+                <div className="stat-label">Std Dev</div>
+                <div style={{fontSize:18,fontWeight:600}}>{stats.std_return.toFixed(6)}</div>
               </div>
+            </div>
+          ) : (
+            <div style={{color:'var(--text-muted)',fontSize:14,padding:20,textAlign:'center'}}>
+              Click "Run Simulation" to start
             </div>
           )}
         </div>
       </div>
 
-      {/* VaR Chart */}
-      {varData && (
+      {/* Histogram */}
+      {histogram && (
         <div className="card">
           <div className="card-header">
-            <div className="card-title">VaR{confidence} Over Time</div>
-            <div className="card-subtitle">{varData.length} time points</div>
+            <div className="card-title">Return Distribution</div>
+            <div className="card-subtitle">
+              {stats?.trials ? `${stats.trials.toLocaleString()} trials` : ''}
+              {running && <span style={{color:'var(--accent-blue)',marginLeft:8}}>Refining...</span>}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={varData}>
+            <BarChart data={histogram}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4a" />
-              <XAxis dataKey="date" stroke="#606080" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#606080" tick={{ fontSize: 11 }} />
+              <XAxis dataKey="bucket" stroke="#606080" tick={{fontSize:10}} tickFormatter={v=>v.toFixed(3)} />
+              <YAxis stroke="#606080" tick={{fontSize:11}} />
               <Tooltip
-                contentStyle={{ background: '#1a1a2e', border: '1px solid #2a2a4a', borderRadius: 8 }}
-                labelStyle={{ color: '#e8e8f0' }}
-                formatter={(v) => [v.toFixed(6), `VaR${confidence}`]}
+                contentStyle={{background:'#1a1a2e',border:'1px solid #2a2a4a',borderRadius:8}}
+                labelStyle={{color:'#e8e8f0'}}
+                formatter={(v,name) => [v, 'Frequency']}
+                labelFormatter={v => `Return: ${parseFloat(v).toFixed(4)}`}
               />
-              <Line type="monotone" dataKey="var_value" stroke="#ef4444" strokeWidth={2} dot={false} name={`VaR${confidence}`} />
-            </LineChart>
+              {stats && <ReferenceLine x={stats.var_value} stroke="#ef4444" strokeDasharray="5 5" label={{value:`VaR${confidence}`,fill:'#ef4444',fontSize:12}} />}
+              <Bar dataKey="frequency" fill="#4f8cff" fillOpacity={0.8} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      {/* Trials Summary */}
-      {trialsSummary?.rows && (
+      {/* Step convergence */}
+      {stepHistory.length > 1 && (
         <div className="card">
-          <div className="card-header">
-            <div className="card-title">Trial Distribution</div>
-            <div className="card-subtitle">Simulations per ticker/date</div>
-          </div>
-          <div style={{ overflowX: 'auto', maxHeight: 400 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Ticker</th>
-                  <th>Num Trials</th>
+          <div className="card-title" style={{marginBottom:16}}>Convergence</div>
+          <table className="data-table">
+            <thead><tr><th>Trials</th><th>VaR{confidence}</th><th>ES{confidence}</th><th>Mean</th><th>Std</th></tr></thead>
+            <tbody>
+              {stepHistory.map((s,i) => (
+                <tr key={i}>
+                  <td style={{fontWeight:600}}>{s.trials.toLocaleString()}</td>
+                  <td style={{color:'var(--accent-red)'}}>{s.var_value.toFixed(6)}</td>
+                  <td style={{color:'var(--accent-orange)'}}>{s.expected_shortfall.toFixed(6)}</td>
+                  <td>{s.mean_return.toFixed(6)}</td>
+                  <td>{s.std_return.toFixed(6)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {trialsSummary.rows.slice(0, 50).map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.date?.substring(0, 10)}</td>
-                    <td><span className="badge badge-blue">{r.ticker}</span></td>
-                    <td>{parseInt(r.num_trials).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
