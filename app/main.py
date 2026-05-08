@@ -131,14 +131,77 @@ class ETLRequest(BaseModel):
     end_date: str = "2026-05-01"
 
 
-def _generate_data_bg(tickers, start, end):
-    """Background task: generate dummy stock + indicator data."""
+ETL_NOTEBOOK_PATH = "/Workspace/Users/shotaro.kotani@databricks.com/risklens-var/notebooks/01_data_etl.py"
+
+def _generate_data_bg(start, end):
+    """Background task: kick off ETL notebook as a serverless job."""
     global etl_progress
-    total_steps = len(tickers) + 3  # schema + portfolio + stocks_table + per-ticker + indicators
+    etl_progress = {"running": True, "current": 0, "total": 3, "current_ticker": "Submitting job...", "done": False, "error": None, "run_url": None}
+    import time
+    try:
+        # Step 1: Submit
+        etl_progress.update({"current": 1, "current_ticker": "Submitting ETL job..."})
+        run_resp = w.api_client.do("POST", "/api/2.1/jobs/runs/submit", body={
+            "run_name": "risklens-var-data-etl",
+            "tasks": [{
+                "task_key": "data_etl",
+                "notebook_task": {
+                    "notebook_path": ETL_NOTEBOOK_PATH,
+                    "base_parameters": {
+                        "catalog": CATALOG,
+                        "schema": SCHEMA,
+                        "start_date": start,
+                        "end_date": end,
+                    },
+                    "source": "WORKSPACE",
+                },
+                "environment_key": "Default",
+            }],
+            "environments": [{
+                "environment_key": "Default",
+                "spec": {"client": "5"},
+            }],
+        })
+        job_run_id = run_resp.get("run_id")
+        print(f"[ETL] Job submitted: run_id={job_run_id}")
+
+        # Step 2: Poll
+        etl_progress.update({"current": 2, "current_ticker": "Downloading from yfinance..."})
+        while True:
+            time.sleep(10)
+            run_info = w.api_client.do("GET", "/api/2.1/jobs/runs/get", query={"run_id": str(job_run_id)})
+            state = run_info.get("state", {})
+            life_cycle = state.get("life_cycle_state", "UNKNOWN")
+            result = state.get("result_state")
+            etl_progress["current_ticker"] = f"Job: {life_cycle}"
+            etl_progress["run_url"] = run_info.get("run_page_url", "")
+            print(f"[ETL] Job status: {life_cycle} / {result}")
+
+            if life_cycle in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+                if result == "SUCCESS":
+                    break
+                else:
+                    error_msg = state.get("state_message", "Unknown error")
+                    raise Exception(f"Job failed: {result} - {error_msg}")
+
+        # Step 3: Done
+        etl_progress.update({"current": 3, "current_ticker": "Done"})
+        etl_progress["done"] = True
+        etl_progress["running"] = False
+
+    except Exception as e:
+        print(f"[ETL] ERROR: {e}")
+        etl_progress["error"] = str(e)
+        etl_progress["running"] = False
+
+
+def _generate_data_bg_OLD(tickers, start, end):
+    """DEPRECATED: SQL dummy data generation."""
+    global etl_progress
+    total_steps = len(tickers) + 3
     etl_progress = {"running": True, "current": 0, "total": total_steps, "current_ticker": "Initializing...", "done": False, "error": None}
 
     try:
-        # Step: Schema
         etl_progress["current_ticker"] = "Creating schema..."
         run_sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
 
@@ -260,13 +323,12 @@ def _generate_data_bg(tickers, start, end):
 
 @app.post("/api/etl/generate")
 def generate_data(req: ETLRequest):
-    """Start dummy data generation in background."""
+    """Start yfinance data download via serverless job."""
     if etl_progress["running"]:
-        raise HTTPException(409, "Generation already in progress")
-    tickers = req.tickers if req.tickers else [p["ticker"] for p in PORTFOLIO]
-    thread = threading.Thread(target=_generate_data_bg, args=(tickers, req.start_date, req.end_date))
+        raise HTTPException(409, "Download already in progress")
+    thread = threading.Thread(target=_generate_data_bg, args=(req.start_date, req.end_date))
     thread.start()
-    return {"status": "started", "tickers": len(tickers)}
+    return {"status": "started"}
 
 
 @app.get("/api/etl/progress")
