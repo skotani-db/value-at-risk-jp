@@ -15,7 +15,7 @@ app = FastAPI(title="Value at Risk - Dashboard")
 w = WorkspaceClient()
 
 # Load application config
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "application.yaml"
+CONFIG_PATH = Path(__file__).parent / "config" / "application.yaml"
 with open(CONFIG_PATH, "r") as f:
     APP_CONFIG = yaml.safe_load(f)
 
@@ -26,12 +26,12 @@ MC_CONFIG = APP_CONFIG["monte-carlo"]
 MODEL_CONFIG = APP_CONFIG["model"]
 
 # Load portfolio
-PORTFOLIO_PATH = Path(__file__).parent.parent / "config" / "portfolio.json"
+PORTFOLIO_PATH = Path(__file__).parent / "config" / "portfolio.json"
 with open(PORTFOLIO_PATH, "r") as f:
     PORTFOLIO = json.load(f)
 
 # Load indicators
-INDICATORS_PATH = Path(__file__).parent.parent / "config" / "indicators.json"
+INDICATORS_PATH = Path(__file__).parent / "config" / "indicators.json"
 with open(INDICATORS_PATH, "r") as f:
     INDICATORS = json.load(f)
 
