@@ -23,5 +23,9 @@ ___
 | tempo                                  | 時系列ライブラリ      | Databricks | https://github.com/databrickslabs/tempo             |
 | PyYAML                                 | YAMLファイル読み込み      | MIT        | https://github.com/yaml/pyyaml                      |
 
+## 動作環境
+- **Serverless Environment**: Version 4 以上
+- **Classic Compute**: DBR 17.x 以降
+
 ## 実行手順
 このアクセラレータを実行するには、本リポジトリをDatabricksワークスペースにクローンしてください。Databricksウェブサイトで公開されているバージョンのノートブックを実行したい場合は、`web-sync`ブランチに切り替えてください。`RUNME`ノートブックをDBR 11.0以降のランタイムで実行するクラスタにアタッチし、Run-Allで実行してください。アクセラレータパイプラインを記述するマルチステップジョブが作成され、そのリンクが提供されます。マルチステップジョブを実行して、パイプラインの動作を確認してください。ジョブの設定はRUNMEノートブックにJSON形式で記述されています。アクセラレータの実行に伴うコストはユーザーの責任となります。
